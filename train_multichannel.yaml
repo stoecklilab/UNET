@@ -1,0 +1,162 @@
+# Sample configuration file for training a 3D U-Net on a multiclass semantic segmentation task.
+
+# model configuration
+model:
+  # number of input channels to the model
+  in_channels: 1
+  # number of classes
+  out_channels: 3
+  # determines the order of operators in a single layer (gcr - GroupNorm+Conv3d+ReLU)
+  layer_order: gcr
+  # number of features at each level of the U-Net
+  f_maps: [ 32, 64, 128, 256 ]
+  # number of groups in the groupnorm
+  num_groups: 8
+  # apply element-wise nn.Sigmoid after the final 1x1 convolution, otherwise apply nn.Softmax (in this case softmax)
+  final_sigmoid: false
+# trainer configuration
+trainer:
+  # path to the checkpoint directory
+  checkpoint_dir: D:/Data/NerveSeg/VentralCrural_TripleChannel/Checkpoints
+  # path to the latest checkpoint; if provided the training will be resumed from that checkpoint
+  resume: null
+  # path to the best_checkpoint.pytorch; to be used for fine-tuning the model with additional ground truth
+  # make sure to decrease the learning rate in the optimizer config accordingly
+  pre_trained: null
+  # how many iterations between validations
+  validate_after_iters: 100
+  # how many iterations between tensorboard logging
+  log_after_iters: 1000
+  # max number of epochs
+  max_num_epochs: 2
+  # max number of iterations
+  max_num_iterations: 100000
+  # model with higher eval score is considered better
+  eval_score_higher_is_better: True
+# loss function configuration
+loss:
+  # use BCE loss for training
+  name: CrossEntropyLoss
+# optimizer configuration
+optimizer:
+  # initial learning rate
+  learning_rate: 0.0002
+  # weight decay
+  weight_decay: 0.00001
+# evaluation metric
+eval_metric:
+  # use average precision metric
+  name: MeanIoU
+# learning rate scheduler configuration
+lr_scheduler:
+  # reduce learning rate when evaluation metric plateaus
+  name: ReduceLROnPlateau
+  # use 'max' if eval_score_higher_is_better=True, 'min' otherwise
+  mode: max
+  # factor by which learning rate will be reduced
+  factor: 0.2
+  # number of *validation runs* with no improvement after which learning rate will be reduced
+  patience: 8
+
+# data loaders configuration
+loaders:
+  # batch dimension; if number of GPUs is N > 1, then a batch_size of N * batch_size will automatically be taken for DataParallel
+  batch_size: 1
+  # how many subprocesses to use for data loading
+  num_workers: 1
+  # path to the raw data within the H5
+  raw_internal_path: raw
+  # path to the label data within the H5
+  label_internal_path: label
+  # path to the pixel-wise weight map withing the H5 if present
+  weight_internal_path: null
+  # configuration of the train loader
+  train:
+    # paths to the training datasets
+    file_paths:
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST305_Left.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST305_Right.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST310_Right.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST381_Left.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST381_Right.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST383_Left.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST384_Left.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST384_Right.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST386_Left.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST387_Left.h5
+      - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Training/ST387_Right.h5
+      
+    # SliceBuilder configuration, i.e. how to iterate over the input volume patch-by-patch
+    slice_builder:
+      name: SliceBuilder
+      # train patch size given to the network (adapt to fit in your GPU mem, generally the bigger patch the better)
+      patch_shape: [ 8, 256, 256 ]
+      # train stride between patches
+      stride_shape: [ 4, 128, 128 ]
+      # minimum volume of the labels in the patch
+      threshold: 0.01
+      # probability of accepting patches which do not fulfil the threshold criterion
+      slack_acceptance: 0.01
+
+    transformer:
+      raw:
+        # subtract mean and divide by std dev
+        - name: Standardize
+        # randomly flips the volume in one of the axis
+        - name: RandomFlip
+        # randomly rotates the volume with 90 deg across a randomly chosen plane
+        - name: RandomRotate90
+        - name: RandomRotate
+          # rotate only in ZY plane due to anisotropy
+          axes: [ [ 2, 1 ] ]
+          # rotates by choosing random angle from [-30, 30] deg
+          angle_spectrum: 30
+          mode: reflect
+        - name: ElasticDeformation
+          spline_order: 3
+        - name: ToTensor
+          expand_dims: true
+      label:
+        - name: RandomFlip
+        - name: RandomRotate90
+        - name: RandomRotate
+          # rotate only in ZY plane due to anisotropy
+          axes: [ [ 2, 1 ] ]
+          angle_spectrum: 30
+          mode: reflect
+        - name: ElasticDeformation
+          spline_order: 0
+          # convert target volume to binary mask
+        - name: ToTensor
+          expand_dims: false
+          dtype: float
+
+  # configuration of the val loader
+  val:
+    # paths to the val datasets
+    file_paths:
+      - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Validation/ST380_Left.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Validation/ST383_Right.h5
+      # - D:/Data/NerveSeg/VentralCrural_TripleChannel/Input/Validation/ST386_Right.h5
+
+    # SliceBuilder configuration, i.e. how to iterate over the input volume patch-by-patch
+    slice_builder:
+      # train patch size given to the network (adapt to fit in your GPU mem, generally the bigger patch the better)
+      patch_shape: [ 8, 256, 256 ]
+      # train stride between patches
+      stride_shape: [ 16, 512, 512 ]
+      # minimum volume of the labels in the patch
+      threshold: 0.01
+      # probability of accepting patches which do not fulfil the threshold criterion
+      slack_acceptance: 0.01
+
+    # data augmentation
+    transformer:
+      raw:
+        - name: Standardize
+        - name: ToTensor
+          expand_dims: true
+      label:
+        - name: ToTensor
+          expand_dims: false
+          dtype: float
